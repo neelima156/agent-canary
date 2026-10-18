@@ -3,3 +3,5 @@ __pycache__/
 .venv/
 results/sandbox/
 .env
+.claude/
+CLAUDE.md
