@@ -1,0 +1,5 @@
+requests>=2.31
+matplotlib>=3.8
+rich>=13
+pillow>=10
+# Optional: Inter font (rsms/inter) for figures; falls back to DejaVu Sans
