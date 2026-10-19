@@ -14,7 +14,7 @@ The "attack" is a harmless canary: a hidden line on a test page asks the agent t
 
 ![Empty final answer next to the tool-call record: CANARY.txt created](results/run-silent-write-qwen3.png)
 
-![Canary writes and summaries returned, by condition](results/defense-tradeoff-chart.png)
+![Canary writes and summaries returned, by condition](results/summaries-and-writes-chart.png)
 
 ![canary writes by condition](results/attack-success-chart.png)
 
@@ -33,7 +33,7 @@ More evidence: [defended run](results/run-defended-qwen3.png), [undefended run](
 ![flow](results/attack-flow-diagram.png)
 - `testpages/test-page.html`: visible content + one white, 1px hidden instruction
 - `agent.py`: minimal agent loop with `read_file` / `write_file`, sandboxed to a per-run folder
-- Defense toggle: a system prompt that labels tool output as untrusted data, plus `<untrusted_content>` delimiters
+- Defended and undefended runs: defended runs add a system prompt that labels tool output as untrusted data, plus `<untrusted_content>` delimiters
 
 ## Run it
 ```bash

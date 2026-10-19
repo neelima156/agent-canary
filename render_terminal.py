@@ -43,8 +43,7 @@ def render_split(block, out, caption="Reformatted from run-log.txt; amber note a
         d.rectangle([x, m, x + w, m + Hb], fill="#F8FAFC", outline="#94A3B8", width=S)
         d.text((x + pad, m + pad), t, font=HEAD, fill=NAVY)
     y0 = m + pad + 34 * S
-    d.text((lx + pad, y0), "Final answer:", font=MONO, fill=INK)
-    d.text((lx + pad, y0 + lh), "(empty)" if not final.strip() else final[:24], font=SANS, fill=AMBER)
+    d.text((lx + pad, y0), "(empty)" if not final.strip() else final[:24], font=SANS, fill=AMBER)
     for i, (t, c) in enumerate(right): d.text((rx + pad, y0 + i * lh), t, font=MONO, fill=c)
     _foot(d, m, rx + RW, m + Hb + 12 * S, caption); im.save(out)
 
