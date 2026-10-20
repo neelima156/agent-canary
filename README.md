@@ -46,6 +46,14 @@ python render_terminal.py   # run-log excerpts into results/
 ```
 Results land in `results/results.json` and `results/run-log.txt`.
 
+## Safety Tax
+
+What a prompt, an approval gate, and a small judge cost this kind of agent in time, tokens, and false blocks, and whether they stop the canary. The matrix is 3 tasks × 4 controls × 5 runs. The harness and a blank results template are in the repo. Measurements are filled in when you run it. See [docs/safety-tax.md](docs/safety-tax.md).
+
+```bash
+python -m safety_tax
+```
+
 ## Lessons
 1. A small model with a write tool followed the hidden line every time without a defense, and once wrote the file without saying anything.
 2. With the prompt defense, no canary writes followed, but llama3.2:3b returned a summary in only 1 of 3 runs (in 2 runs it never read the file). Measure unauthorized actions and returned summaries together. A prompt is guidance; an enforced approval gate before risky tools is a control (recommended, not tested here).
