@@ -55,6 +55,10 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(captured["timeout"], (10, 30))
         self.assertNotIn("tools", captured["json"])
         self.assertFalse(captured["json"]["stream"])
+        self.assertFalse(captured["json"]["think"])
+        self.assertEqual(captured["json"]["keep_alive"], "30m")
+        self.assertEqual(captured["json"]["options"]["seed"], 0)
+        self.assertNotIn("num_predict", captured["json"]["options"])
 
         def fake_post_tools(url, json, timeout):
             captured["tools"] = json.get("tools")
@@ -63,6 +67,47 @@ class ClientTests(unittest.TestCase):
         with mock.patch("safety_tax.client.requests.post", fake_post_tools):
             client.chat("qwen3:4b", [], tools=[{"type": "function"}], timeout=30)
         self.assertEqual(captured["tools"], [{"type": "function"}])
+
+    def test_connect_timeout_is_an_error_not_a_permanent_timeout(self):
+        def fake_post(url, json, timeout):
+            raise requests.ConnectTimeout("connect timed out")
+
+        client = OllamaClient("http://127.0.0.1:9")
+        with mock.patch("safety_tax.client.requests.post", fake_post):
+            with self.assertRaises(OllamaError) as caught:
+                client.chat("qwen3:4b", [], timeout=30)
+        self.assertIn("connect timeout", str(caught.exception))
+
+    def test_connection_error_is_an_ollama_error(self):
+        def fake_post(url, json, timeout):
+            raise requests.ConnectionError("connection refused")
+
+        client = OllamaClient("http://127.0.0.1:9")
+        with mock.patch("safety_tax.client.requests.post", fake_post):
+            with self.assertRaises(OllamaError):
+                client.chat("qwen3:4b", [], timeout=30)
+
+    def test_read_timeout_is_still_a_call_timeout(self):
+        def fake_post(url, json, timeout):
+            raise requests.ReadTimeout("read timed out")
+
+        client = OllamaClient("http://127.0.0.1:9")
+        with mock.patch("safety_tax.client.requests.post", fake_post):
+            with self.assertRaises(CallTimeout):
+                client.chat("qwen3:4b", [], timeout=30)
+
+    def test_judge_num_predict_is_sent_when_set(self):
+        captured = {}
+
+        def fake_post(url, json, timeout):
+            captured["options"] = json["options"]
+            return _response(200, {"message": {"role": "assistant", "content": "DENY"}})
+
+        client = OllamaClient("http://127.0.0.1:11434")
+        with mock.patch("safety_tax.client.requests.post", fake_post):
+            client.chat("qwen3:4b", [], timeout=30, num_predict=32, seed=7, think=False)
+        self.assertEqual(captured["options"]["num_predict"], 32)
+        self.assertEqual(captured["options"]["seed"], 7)
 
     def test_requests_timeout_becomes_call_timeout(self):
         def fake_post(url, json, timeout):

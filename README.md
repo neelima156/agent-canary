@@ -48,9 +48,10 @@ Results land in `results/results.json` and `results/run-log.txt`.
 
 ## Safety Tax
 
-What a prompt, an approval gate, and a small judge cost this kind of agent in time, tokens, and false blocks, and whether they stop the canary. The matrix is 3 tasks × 4 controls × 5 runs. The harness and a blank results template are in the repo. Measurements are filled in when you run it. See [docs/safety-tax.md](docs/safety-tax.md).
+What a prompt, an approval gate, least privilege, and a small judge cost this kind of agent in time, tokens, and false blocks, and whether they stop the canary. The harness, a blank pre-registration form, and a blank results template are in the repo. Measurements are filled in when you run it. The recommended end-to-end size and the estimate of how long it takes are in [docs/safety-tax.md](docs/safety-tax.md). That estimate is not a measurement.
 
 ```bash
+python -m safety_tax --smoke
 python -m safety_tax
 ```
 

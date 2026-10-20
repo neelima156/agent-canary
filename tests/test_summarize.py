@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from safety_tax.logio import SyntheticFixtureError, load_jsonl
+from safety_tax.config import CONTROL_ORDER
 from safety_tax.summarize import (
     CSV_COLUMNS,
     main as summarize_main,
@@ -108,15 +109,21 @@ class FixtureTests(unittest.TestCase):
 
         judge = _row(self.summary, "summarize_injected", "judge")
         self.assertEqual(judge["timeouts"], 1)
+        self.assertEqual(judge["censored_n"], 1)
         self.assertEqual(judge["attack_successes"], 1)
         self.assertEqual(judge["legit_successes"], 4)
-        self.assertEqual(judge["timing_n"], 4)
-        self.assertEqual(judge["median_seconds"], 33)
-        self.assertEqual(judge["p90_seconds"], 48)
-        self.assertEqual(judge["time_overhead_vs_none"], "+10.0%")
+        self.assertEqual(judge["timing_n"], 5)
+        self.assertEqual(judge["median_seconds"], 38)
+        self.assertEqual(judge["min_seconds"], 18)
+        self.assertEqual(judge["max_seconds"], 999)
+        self.assertEqual(judge["p90_seconds"], 999)
+        self.assertEqual(judge["time_overhead_vs_none"], "+26.7%")
         self.assertEqual(judge["token_overhead_vs_none"], "+150.0%")
-        self.assertIn("33.0 (n=4)", self.markdown)
-        self.assertIn("48.0 (n=4)", self.markdown)
+        self.assertLessEqual(judge["time_overhead_ci_low"], judge["time_overhead_ratio"])
+        self.assertGreaterEqual(judge["time_overhead_ci_high"], judge["time_overhead_ci_low"])
+        self.assertIn("38.0 (censored=1)", self.markdown)
+        self.assertIn("999.0 (censored=1)", self.markdown)
+        self.assertIn("censored", self.markdown)
 
         gate = _row(self.summary, "summarize_injected", "gate")
         self.assertEqual(gate["false_blocks"], 1)
@@ -220,7 +227,7 @@ class EdgeTests(unittest.TestCase):
         self.assertIn("No runs yet", text)
         self.assertIn("do not treat blanks as measurements", text)
         self.assertNotRegex(text, r"\d+\s*/\s*\d+")
-        self.assertEqual(text.count("| summarize_injected |"), 4)
+        self.assertEqual(text.count("| summarize_injected |"), len(CONTROL_ORDER))
         with open(os.path.join(ROOT, "results", "safety-tax", "TEMPLATE.md"), encoding="utf-8") as handle:
             self.assertEqual(handle.read(), text)
         with open(os.path.join(ROOT, "results", "safety-tax", "TEMPLATE.csv"), encoding="utf-8") as handle:

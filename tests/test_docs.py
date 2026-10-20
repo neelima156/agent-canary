@@ -21,6 +21,14 @@ class DocTests(unittest.TestCase):
         self.assertIsNone(RATE.search(results), RATE.search(results).group(0) if RATE.search(results) else "")
         self.assertNotIn("+16.7%", text)
         self.assertNotIn("33.0", text)
+        self.assertIn("## Pre-registration", text)
+        self.assertIn("## Claims you can and cannot make", text)
+        self.assertIn("ESTIMATE", text)
+        self.assertNotIn("same as `agent.py`", text)
+        with open(os.path.join(ROOT, "results", "safety-tax", "PREREGISTRATION.md"), encoding="utf-8") as handle:
+            form = handle.read()
+        self.assertIn("Hypothesis 1", form)
+        self.assertIsNone(RATE.search(form))
 
     def test_readme_points_at_the_experiment(self):
         with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as handle:

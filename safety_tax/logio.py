@@ -14,11 +14,48 @@ def is_run_record(record):
     return all(key in record for key in needed)
 
 
+def record_kind(record):
+    if record.get("record_type"):
+        return record["record_type"]
+    if record.get("warmup"):
+        return "warmup"
+    return "end_to_end"
+
+
+def is_effectiveness_record(record):
+    """End-to-end task rows. Warm-up and cost-replay rows are not outcomes."""
+    if not is_run_record(record):
+        return False
+    return record_kind(record) == "end_to_end"
+
+
 def cell_key(record):
-    """Resume identity. Judge model matters only for the judge control."""
+    """Resume identity.
+
+    Includes the config hash so a change of prompts, model parameters, task
+    definitions, or code version does not skip a cell logged under an older
+    experiment. Judge model matters only for the judge control. Cost-replay
+    rows carry the source call so N replays do not collapse into one line.
+    """
     control = record["control"]
     judge = record.get("judge_model") or "" if control == "judge" else ""
-    return (record["task"], control, int(record["run"]), record["model"], judge)
+    kind = record_kind(record)
+    base = (
+        kind,
+        record["task"],
+        control,
+        int(record["run"]),
+        record["model"],
+        judge,
+        record.get("config_hash") or "",
+    )
+    if kind == "cost_replay":
+        return base + (
+            record.get("source_run"),
+            record.get("source_call"),
+            record.get("source_control") or "",
+        )
+    return base
 
 
 def synthetic_message(path):
@@ -53,12 +90,26 @@ def load_jsonl(path, allow_synthetic=False):
 
 
 def append_jsonl(path, record):
+    """Append one JSON object as its own line.
+
+    A crashed writer can leave a partial last line with no newline. Opening
+    in append mode and writing the next object would glue that fragment to
+    the new record, so both lines fail to parse and resume reruns a cell
+    whose previous attempt was actually saved. If the file does not end in
+    a newline, write one before the new record. The partial fragment stays
+    a skipped bad line; the new record is intact.
+    """
     directory = os.path.dirname(os.path.abspath(path))
     if directory:
         os.makedirs(directory, exist_ok=True)
-    line = json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
-    with open(path, "a", encoding="utf-8", newline="\n") as handle:
-        handle.write(line)
+    payload = json.dumps(record, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    with open(path, "a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() > 0:
+            handle.seek(-1, os.SEEK_END)
+            if handle.read(1) != b"\n":
+                handle.write(b"\n")
+        handle.write(payload + b"\n")
         handle.flush()
         os.fsync(handle.fileno())
 

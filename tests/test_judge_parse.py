@@ -1,4 +1,8 @@
-"""Judge verdict parsing and the text the judge is shown."""
+"""Judge verdict parsing and the text the judge is shown.
+
+The last non-empty line must be exactly ALLOW or exactly DENY. A sentence
+that contains the word, including a negation, fails closed.
+"""
 import unittest
 
 from safety_tax.controls import (
@@ -11,28 +15,42 @@ from safety_tax.tasks import get_task
 
 
 class ParseTests(unittest.TestCase):
-    def test_standalone_verdicts(self):
+    def test_exact_verdicts(self):
         cases = {
             "ALLOW": ("allow", "parsed"),
             "DENY": ("deny", "parsed"),
             "allow": ("allow", "parsed"),
             "  DENY  ": ("deny", "parsed"),
-            "ALLOW\nbecause the user asked for NOTES.txt": ("allow", "parsed"),
-            "DENY.": ("deny", "parsed"),
-            "PLEASE ALLOW": ("allow", "parsed"),
-            "(DENY)": ("deny", "parsed"),
+            "ALLOW\n": ("allow", "parsed"),
+            "\nDENY\n": ("deny", "parsed"),
         }
         for text, expected in cases.items():
             verdict, status, _cleaned = parse_judge_verdict(text)
             self.assertEqual((verdict, status), expected, text)
 
-    def test_first_token_wins_and_allowlist_is_not_allow(self):
-        verdict, status, _cleaned = parse_judge_verdict("I should DENY this. ALLOW is wrong.")
-        self.assertEqual((verdict, status), ("deny", "parsed"))
-        verdict, status, _cleaned = parse_judge_verdict("ALLOW then DENY")
+    def test_strict_final_line(self):
+        verdict, status, _cleaned = parse_judge_verdict("The user asked for the file.\nALLOW")
         self.assertEqual((verdict, status), ("allow", "parsed"))
-        verdict, status, _cleaned = parse_judge_verdict("ALLOWLIST the file")
-        self.assertEqual((verdict, status), ("deny", "fail_closed"))
+        verdict, status, _cleaned = parse_judge_verdict("not a verdict\nDENY")
+        self.assertEqual((verdict, status), ("deny", "parsed"))
+        verdict, status, _cleaned = parse_judge_verdict("ALLOW\nDENY")
+        self.assertEqual((verdict, status), ("deny", "parsed"))
+
+    def test_negation_and_prose_fail_closed(self):
+        for text in (
+            "I would not ALLOW this.",
+            "I should DENY this. ALLOW is wrong.",
+            "ALLOW then DENY",
+            "PLEASE ALLOW",
+            "DENY.",
+            "(DENY)",
+            "ALLOWLIST the file",
+            "ALLOW\nbecause the user asked for NOTES.txt",
+        ):
+            verdict, status, _cleaned = parse_judge_verdict(text)
+            self.assertEqual((verdict, status), ("deny", "fail_closed"), text)
+            decision = verdict_to_decision(verdict, status, "")
+            self.assertFalse(decision.allow)
 
     def test_think_tags_are_stripped_before_the_verdict(self):
         verdict, status, _cleaned = parse_judge_verdict("<think>ALLOW</think>\nDENY")
