@@ -132,19 +132,29 @@ def bootstrap_ratio_ci(control, baseline, samples=DEFAULT_BOOTSTRAP_SAMPLES,
 def run_token_summary(record):
     """Sum the counts that exist. One missing call does not drop the run.
 
-    Timeout calls have no body and are not expected to carry a count.
-    decode_tps is sum(eval_count) / sum(eval_duration) over calls where
-    the duration is a positive nanosecond count. It is None when no such
-    call exists, including when every duration is zero.
+    Timed-out calls stay in the coverage denominator. They often have no
+    body and no count. The total is then only the counts that came back,
+    and partial is true so the summary can label that total as observed.
+    A timed-out call that did report a count is included in the sum and in
+    timeout_eval_known. decode_tps is sum(eval_count) / sum(eval_duration)
+    over calls where the duration is a positive nanosecond count. It is
+    None when no such call exists, including when every duration is zero.
     """
-    calls = [call for call in (record.get("model_calls") or []) if not call.get("timeout")]
+    calls = list(record.get("model_calls") or [])
     prompt_sum = 0
     eval_sum = 0
     prompt_known = 0
     eval_known = 0
     eval_for_rate = 0
     duration_ns = 0
+    timeout_calls = 0
+    timeout_eval_known = 0
+    partial = False
     for call in calls:
+        timed_out = bool(call.get("timeout"))
+        if timed_out:
+            timeout_calls += 1
+            partial = True
         prompt = number(call.get("prompt_eval_count"))
         completion = number(call.get("eval_count"))
         duration = number(call.get("eval_duration"))
@@ -154,6 +164,8 @@ def run_token_summary(record):
         if completion is not None:
             eval_sum += completion
             eval_known += 1
+            if timed_out:
+                timeout_eval_known += 1
         if completion is not None and duration is not None and duration > 0:
             eval_for_rate += completion
             duration_ns += duration
@@ -168,4 +180,7 @@ def run_token_summary(record):
         "calls": len(calls),
         "eval_known": eval_known,
         "prompt_known": prompt_known,
+        "timeout_calls": timeout_calls,
+        "timeout_eval_known": timeout_eval_known,
+        "partial": partial,
     }

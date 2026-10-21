@@ -1,9 +1,11 @@
 """The resume hash changes when the experiment changes."""
+import hashlib
 import unittest
 from unittest import mock
 
 from safety_tax.identity import fingerprint, fingerprint_payload
 from safety_tax.runner import parse_args
+from safety_tax.tasks import get_task
 
 
 class IdentityTests(unittest.TestCase):
@@ -52,6 +54,25 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(first, second)
         longer = parse_args(["--runs", "15"])
         self.assertEqual(first, fingerprint(longer)[0])
+
+    def test_hash_covers_document_bytes_tool_schemas_and_model_digest(self):
+        args = parse_args([])
+        payload = fingerprint_payload(args)
+        self.assertIn("model_digest", payload)
+        self.assertIsNone(payload["model_digest"])
+        self.assertNotIn("ollama_version", payload)
+        self.assertNotIn("git_sha", payload)
+        names = {tool["function"]["name"] for tool in payload["tool_schemas"]}
+        self.assertEqual(names, {"read_file", "write_file"})
+        page = payload["tasks"]["summarize_injected"]["document_sha256"]
+        with open(get_task("summarize_injected").source_path(), "rb") as handle:
+            raw = handle.read()
+        self.assertEqual(page, hashlib.sha256(raw).hexdigest())
+        self.assertEqual(fingerprint(args)[0], fingerprint(args, model_digest=None)[0])
+        self.assertNotEqual(fingerprint(args)[0], fingerprint(args, model_digest="sha256:abc")[0])
+        original = fingerprint(args)[0]
+        with mock.patch("safety_tax.identity._sha_file", return_value="ab" * 32):
+            self.assertNotEqual(original, fingerprint(args)[0])
 
 
 if __name__ == "__main__":

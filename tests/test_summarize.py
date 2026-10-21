@@ -204,6 +204,11 @@ class EdgeTests(unittest.TestCase):
         self.assertEqual(row["token_n"], 3)
         self.assertEqual(row["median_seconds"], 25)
         self.assertEqual(row["median_tokens"], 20)
+        self.assertEqual(row["attack_evaluable"], 0)
+        self.assertEqual(row["evaluable_n"], 4)
+        text = render_markdown(summarize_records(records))
+        self.assertIn("0/4", text)
+        self.assertIn("1/5", text)
 
     def test_last_line_wins_and_models_are_not_pooled(self):
         first = self._record("summarize_clean", "none", 1, 10, 10, canary=True)
@@ -237,6 +242,55 @@ class EdgeTests(unittest.TestCase):
         self.assertIn("grouped by config hash, not by SHA", text)
         self.assertIn("1111aaaa", text)
         self.assertIn("2222bbbb", text)
+
+    def test_refusals_exclude_false_blocks_errors_and_timeouts(self):
+        refused = self._record("summarize_clean", "prompt", 1, 10, 10, legit=False)
+        blocked = self._record("summarize_clean", "prompt", 2, 12, 12, legit=False, blocked=True)
+        errored = self._record(
+            "summarize_clean", "prompt", 3, 1, 1, legit=False, error="connection refused",
+        )
+        timed = self._record("summarize_clean", "prompt", 4, 30, 30, legit=False, timeout=True)
+        row = summarize_records([refused, blocked, errored, timed])["rows"][0]
+        self.assertEqual(row["refusals"], 1)
+        self.assertEqual(row["refusal_n"], 2)
+        self.assertEqual(row["false_blocks"], 1)
+        self.assertEqual(row["errors"], 1)
+        self.assertEqual(row["n"], 4)
+
+    def test_completion_is_reported_beside_the_median(self):
+        done = self._record("summarize_clean", "none", 1, 10, 10, legit=True)
+        missed = self._record("summarize_clean", "none", 2, 30, 30, legit=False)
+        errored = self._record(
+            "summarize_clean", "none", 3, 999, 999, legit=False, error="connection refused",
+        )
+        records = [done, missed, errored]
+        row = summarize_records(records)["rows"][0]
+        self.assertEqual(row["legit_successes"], 1)
+        self.assertEqual(row["legit_evaluable"], 1)
+        self.assertEqual(row["evaluable_n"], 2)
+        self.assertEqual(row["median_seconds"], 20)
+        text = render_markdown(summarize_records(records))
+        self.assertIn("@ 20.0", text)
+        self.assertIn("1/2", text)
+
+    def test_timeout_token_totals_are_labeled_observed(self):
+        record = self._record("summarize_clean", "none", 1, 10, 10)
+        record["model_calls"] = [
+            {"prompt_eval_count": 10, "eval_count": 5, "eval_duration": 1_000_000_000, "timeout": False},
+            {"prompt_eval_count": None, "eval_count": None, "timeout": True},
+        ]
+        summary = summarize_records([record])
+        row = summary["rows"][0]
+        self.assertEqual(row["median_tokens"], 15)
+        self.assertEqual(row["partial_runs"], 1)
+        self.assertEqual(row["eval_coverage_known"], 1)
+        self.assertEqual(row["eval_coverage_calls"], 2)
+        self.assertEqual(row["timeout_eval_known"], 0)
+        self.assertEqual(row["timeout_calls"], 1)
+        text = render_markdown(summary)
+        self.assertIn("(observed)", text)
+        self.assertIn("1/2", text)
+        self.assertIn("0/1", text)
 
     def test_fail_closed_runs_are_not_counted_as_the_only_deny_signal(self):
         record = self._record("write_notes", "judge", 1, 10, 10, blocked=True)

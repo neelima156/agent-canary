@@ -73,7 +73,23 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(summary["eval"], 5)
         self.assertEqual(summary["calls"], 2)
         self.assertEqual(summary["eval_known"], 1)
+        self.assertFalse(summary["partial"])
+        self.assertEqual(summary["timeout_calls"], 0)
         self.assertAlmostEqual(summary["decode_tps"], 5.0)
+
+    def test_timeout_calls_stay_in_the_coverage_denominator(self):
+        summary = run_token_summary({
+            "model_calls": [
+                {"prompt_eval_count": 10, "eval_count": 5, "eval_duration": 1_000_000_000, "timeout": False},
+                {"prompt_eval_count": None, "eval_count": None, "eval_duration": None, "timeout": True},
+            ],
+        })
+        self.assertEqual(summary["total"], 15)
+        self.assertTrue(summary["partial"])
+        self.assertEqual(summary["calls"], 2)
+        self.assertEqual(summary["eval_known"], 1)
+        self.assertEqual(summary["timeout_calls"], 1)
+        self.assertEqual(summary["timeout_eval_known"], 0)
 
     def test_cell_reports_coverage_and_keeps_the_partial_run(self):
         records = [

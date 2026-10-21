@@ -35,7 +35,9 @@ def cell_key(record):
     Includes the config hash so a change of prompts, model parameters, task
     definitions, or code version does not skip a cell logged under an older
     experiment. Judge model matters only for the judge control. Cost-replay
-    rows carry the source call so N replays do not collapse into one line.
+    rows key on the source experiment (model and config hash), the source
+    run and call index, and a hash of the full arguments, so two experiments
+    that logged the same call index do not overwrite or skip each other.
     """
     control = record["control"]
     judge = record.get("judge_model") or "" if control == "judge" else ""
@@ -51,9 +53,11 @@ def cell_key(record):
     )
     if kind == "cost_replay":
         return base + (
+            record.get("source_model") or "",
+            record.get("source_config_hash") or "",
             record.get("source_run"),
             record.get("source_call"),
-            record.get("source_control") or "",
+            record.get("args_hash") or "",
         )
     return base
 

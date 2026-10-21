@@ -10,6 +10,7 @@ from safety_tax.client import (
     describe_preflight,
     empty_timing,
     format_preflight,
+    lookup_model_identity,
 )
 from safety_tax.config import (
     CONTROL_ORDER,
@@ -228,7 +229,8 @@ def _probe_once(args, client, model, messages):
         return {}, empty_timing("warmup", 0.0, False), False, f"{type(exc).__name__}: {exc}"
 
 
-def probe_model(args, client, config_hash, sha, purpose="warmup"):
+def probe_model(args, client, config_hash, sha, purpose="warmup",
+                model_digest=None, ollama_version=None):
     """Two identical discarded calls. Prints preflight lines and appends one warm-up row.
 
     The second call is the same prompt, so a cached prompt that drops
@@ -257,6 +259,8 @@ def probe_model(args, client, config_hash, sha, purpose="warmup"):
         "control": "warmup",
         "run": 0,
         "model": model,
+        "model_digest": model_digest,
+        "ollama_version": ollama_version,
         "judge_model": None,
         "config_hash": config_hash,
         "git_sha": sha,
@@ -290,7 +294,7 @@ def _clip_probe_text(text):
     return shown
 
 
-def probe_judge_pair(args, client, config_hash, sha):
+def probe_judge_pair(args, client, config_hash, sha, model_digest=None, ollama_version=None):
     """One judge call on a known allow and one on a known deny.
 
     Prints the raw reply and the parse status. These rows are judge probes,
@@ -345,6 +349,8 @@ def probe_judge_pair(args, client, config_hash, sha):
             "control": "judge",
             "run": 0,
             "model": args.model,
+            "model_digest": model_digest,
+            "ollama_version": ollama_version,
             "judge_model": judge_model,
             "config_hash": config_hash,
             "git_sha": sha,
@@ -366,10 +372,11 @@ def run_batch(args, client=None, clock=None):
     if client is None:
         client = OllamaClient(host)
     judge_model = args.judge_model or args.model
-    config_hash, _payload = fingerprint(args)
     sha = git_sha()
     out = args.out
     existing, warnings = load_jsonl(out, allow_synthetic=False)
+    model_digest, ollama_version = lookup_model_identity(client, args.model)
+    config_hash, _payload = fingerprint(args, model_digest=model_digest)
     for warning in warnings:
         print(f"warning: {warning}", flush=True)
     done = _done_keys(existing, args.retry_errors)
@@ -389,9 +396,15 @@ def run_batch(args, client=None, clock=None):
         flush=True,
     )
     if args.smoke:
-        probe_judge_pair(args, client, config_hash, sha)
+        probe_judge_pair(
+            args, client, config_hash, sha,
+            model_digest=model_digest, ollama_version=ollama_version,
+        )
     if pending:
-        probe_model(args, client, config_hash, sha, purpose="batch warmup")
+        probe_model(
+            args, client, config_hash, sha, purpose="batch warmup",
+            model_digest=model_digest, ollama_version=ollama_version,
+        )
     executed = []
     skipped = len(cells) - len(pending)
     for index, task_id, control, run_index in pending:
@@ -419,6 +432,8 @@ def run_batch(args, client=None, clock=None):
                 keep_alive=args.keep_alive,
                 think=False,
                 judge_num_predict=args.judge_num_predict,
+                model_digest=model_digest,
+                ollama_version=ollama_version,
             )
         except Exception as exc:
             record = error_record(
@@ -431,6 +446,7 @@ def run_batch(args, client=None, clock=None):
                 max_turns=args.max_turns, num_ctx=args.num_ctx, seed=args.seed,
                 keep_alive=args.keep_alive, judge_num_predict=args.judge_num_predict,
                 cold_load_ns=args.cold_load_ns,
+                model_digest=model_digest, ollama_version=ollama_version,
             )
         append_jsonl(out, record)
         executed.append(record)
@@ -465,9 +481,18 @@ def main(argv=None):
     if args.preflight:
         host = args.ollama_host or default_host()
         client = OllamaClient(host)
-        config_hash, _payload = fingerprint(args)
         try:
-            return probe_model(args, client, config_hash, git_sha(), purpose="preflight")
+            load_jsonl(args.out, allow_synthetic=False)
+        except SyntheticFixtureError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        model_digest, ollama_version = lookup_model_identity(client, args.model)
+        config_hash, _payload = fingerprint(args, model_digest=model_digest)
+        try:
+            return probe_model(
+                args, client, config_hash, git_sha(), purpose="preflight",
+                model_digest=model_digest, ollama_version=ollama_version,
+            )
         except SyntheticFixtureError as exc:
             print(exc, file=sys.stderr)
             return 2

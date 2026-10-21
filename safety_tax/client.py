@@ -168,3 +168,47 @@ class OllamaClient:
         timing["wall_seconds"] = round(wall, 3)
         timing["timeout"] = False
         return message, timing
+
+    def model_identity(self, model):
+        """Ollama model digest and server version. Failures are unknown, not fatal.
+
+        The digest is part of the config hash. The version is stored on each
+        row and is not hashed. A short connect timeout keeps a down server
+        from stalling startup.
+        """
+        connect = min(float(self.connect_timeout), 2.0)
+        timeout = (connect, 5.0)
+        digest = None
+        version = None
+        try:
+            response = requests.get(f"{self.host}/api/version", timeout=timeout)
+            data = response.json()
+            if isinstance(data, dict):
+                version = data.get("version") or None
+        except Exception:
+            version = None
+        try:
+            response = requests.post(
+                f"{self.host}/api/show", json={"model": model}, timeout=timeout,
+            )
+            data = response.json()
+            if isinstance(data, dict):
+                digest = data.get("digest") or None
+        except Exception:
+            digest = None
+        return digest, version
+
+
+def lookup_model_identity(client, model):
+    """Call model_identity when the client has it. Fake clients return unknown."""
+    lookup = getattr(client, "model_identity", None)
+    if not callable(lookup):
+        return None, None
+    try:
+        found = lookup(model)
+    except Exception:
+        return None, None
+    if not isinstance(found, (tuple, list)) or len(found) != 2:
+        return None, None
+    digest, version = found
+    return digest or None, version or None

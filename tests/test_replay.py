@@ -5,11 +5,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from safety_tax.logio import load_jsonl
-from safety_tax.replay import run_replay
+from safety_tax.replay import extract_calls, run_replay
 from safety_tax.runner import parse_args
 from safety_tax.summarize import summarize_records
 from support import FakeClient, assistant
@@ -197,6 +198,84 @@ class ReplayTests(unittest.TestCase):
             self.assertEqual(row["decision_disagreements"], 1)
             self.assertEqual(row["true_allow"], 1)
             self.assertEqual(row["true_deny"], 1)
+
+    def test_different_source_experiments_do_not_collapse_or_skip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, "source.jsonl")
+            out = os.path.join(directory, "replay.jsonl")
+
+            def write_sources(configs):
+                with open(source, "w", encoding="utf-8") as handle:
+                    for config, content in configs:
+                        row = {
+                            "task": "write_notes",
+                            "control": "none",
+                            "run": 1,
+                            "model": "qwen3:4b",
+                            "config_hash": config,
+                            "record_type": "end_to_end",
+                            "tool_calls": [{
+                                "tool": "write_file",
+                                "args": {"path": "NOTES.txt", "content": content},
+                            }],
+                        }
+                        handle.write(json.dumps(row) + "\n")
+
+            write_sources((
+                ("hash-aaa", "water and a walk"),
+                ("hash-bbb", "BLUEBIRD"),
+            ))
+            args = parse_args([
+                "--cost-replay",
+                "--replay-from", source,
+                "--replay-n", "1",
+                "--out", out,
+                "--controls", "gate",
+                "--no-summary",
+                "--model", "qwen3:4b",
+            ])
+            self.assertEqual(run_replay(args, client=FakeClient([])), 0)
+            records, _warnings = load_jsonl(out)
+            self.assertEqual(len(records), 2)
+            self.assertEqual(
+                {record["source_config_hash"] for record in records},
+                {"hash-aaa", "hash-bbb"},
+            )
+            self.assertEqual(len({record["args_hash"] for record in records}), 2)
+            self.assertEqual(run_replay(args, client=FakeClient([])), 0)
+            self.assertEqual(len(load_jsonl(out)[0]), 2)
+            write_sources((
+                ("hash-aaa", "water and a walk"),
+                ("hash-bbb", "BLUEBIRD"),
+                ("hash-ccc", "still water and a walk"),
+            ))
+            self.assertEqual(run_replay(args, client=FakeClient([])), 0)
+            third, _warnings = load_jsonl(out)
+            self.assertEqual(len(third), 3)
+            self.assertIn("hash-ccc", {record["source_config_hash"] for record in third})
+
+    def test_done_set_updates_after_append(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, "source.jsonl")
+            _source(source)
+            args = parse_args([
+                "--cost-replay",
+                "--replay-from", source,
+                "--replay-n", "1",
+                "--out", os.path.join(directory, "out.jsonl"),
+                "--controls", "gate",
+                "--no-summary",
+                "--model", "qwen3:4b",
+            ])
+
+            def doubled(records, tasks):
+                calls, raw_count = extract_calls(records, tasks)
+                return calls + calls, raw_count
+
+            with mock.patch("safety_tax.replay.extract_calls", side_effect=doubled):
+                self.assertEqual(run_replay(args, client=FakeClient([])), 0)
+            records, _warnings = load_jsonl(args.out)
+            self.assertEqual(len(records), 2)
 
 
 if __name__ == "__main__":

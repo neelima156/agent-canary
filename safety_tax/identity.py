@@ -1,15 +1,19 @@
 """Config hash for resume identity and for the JSONL row.
 
-The hash covers the prompts, the model parameters, and the task definitions.
-It does not cover the git SHA or --runs. The SHA is still written on each
-row. A later commit that does not change the fingerprinted settings resumes
-the same cells, and a pilot of --runs 5 extends to --runs 15 on the same
-hash. Two runs with different hashes are different experiments.
+The hash covers the prompts, the model parameters, the task definitions,
+the bytes of each test page, the tool schemas, and the Ollama model digest
+when one was recorded. It does not cover the git SHA, the Ollama version
+string, or --runs. The SHA and the Ollama version are still written on
+each row. A later commit that does not change the fingerprinted settings
+resumes the same cells, and a pilot of --runs 5 extends to --runs 15 on
+the same hash. Two runs with different hashes are different experiments.
 """
 import hashlib
 import json
 import os
 import subprocess
+
+from agent import TOOLS
 
 from safety_tax import __version__
 from safety_tax.config import (
@@ -49,6 +53,18 @@ def git_sha():
     return _SHA
 
 
+def _sha_file(path):
+    """SHA-256 of the file bytes, or None when the file cannot be read."""
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
 def _task_payload(task):
     actions = sorted(
         ({"path": action.path, "tool": action.tool} for action in task.expected_actions),
@@ -56,6 +72,7 @@ def _task_payload(task):
     )
     return {
         "document_name": task.document_name,
+        "document_sha256": _sha_file(task.source_path()),
         "expected_actions": actions,
         "forbid_other_writes": task.forbid_other_writes,
         "injection": task.injection,
@@ -67,8 +84,12 @@ def _task_payload(task):
     }
 
 
-def fingerprint_payload(args):
-    """JSON-stable description of the experiment this process would run."""
+def fingerprint_payload(args, model_digest=None):
+    """JSON-stable description of the experiment this process would run.
+
+    model_digest is the Ollama /api/show digest, or None when it is unknown.
+    The Ollama version string is logged on rows and is not part of this payload.
+    """
     judge_model = args.judge_model or args.model
     tools = {}
     for task_id, task in sorted(TASKS.items()):
@@ -89,6 +110,7 @@ def fingerprint_payload(args):
         "keep_alive": args.keep_alive,
         "max_turns": args.max_turns,
         "model": args.model,
+        "model_digest": model_digest,
         "num_ctx": args.num_ctx,
         "order_seed": args.order_seed,
         "rubric": {
@@ -102,6 +124,7 @@ def fingerprint_payload(args):
         "tasks": {task_id: _task_payload(task) for task_id, task in sorted(TASKS.items())},
         "temperature": args.temperature,
         "think": False,
+        "tool_schemas": TOOLS,
         "tools": tools,
     }
 
@@ -111,6 +134,6 @@ def config_hash(payload):
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def fingerprint(args):
-    payload = fingerprint_payload(args)
+def fingerprint(args, model_digest=None):
+    payload = fingerprint_payload(args, model_digest=model_digest)
     return config_hash(payload), payload
