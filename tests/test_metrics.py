@@ -42,7 +42,7 @@ class MetricTests(unittest.TestCase):
             "call_timeout_s": 300,
             "wall_seconds": 900.4,
         })
-        self.assertEqual(value, 900)
+        self.assertEqual(value, 900.4)
         dropped, censored = censored_latency({
             "timeout": False,
             "error": "connection refused",
@@ -50,6 +50,17 @@ class MetricTests(unittest.TestCase):
         })
         self.assertIsNone(dropped)
         self.assertFalse(censored)
+
+    def test_timeout_slower_than_the_cap_is_not_censored_downward(self):
+        value, censored = censored_latency({
+            "timeout": True,
+            "timeout_scope": "call",
+            "call_timeout_s": 300,
+            "timeout_cap_s": 300,
+            "wall_seconds": 400,
+        })
+        self.assertTrue(censored)
+        self.assertEqual(value, 400)
 
     def test_one_missing_count_does_not_drop_the_run(self):
         summary = run_token_summary({

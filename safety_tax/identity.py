@@ -1,8 +1,10 @@
 """Config hash for resume identity and for the JSONL row.
 
-The hash covers the prompts, the model parameters, the task definitions,
-and the git SHA when git can provide one. Two runs with different hashes
-are different experiments and do not resume over each other.
+The hash covers the prompts, the model parameters, and the task definitions.
+It does not cover the git SHA or --runs. The SHA is still written on each
+row. A later commit that does not change the fingerprinted settings resumes
+the same cells, and a pilot of --runs 5 extends to --runs 15 on the same
+hash. Two runs with different hashes are different experiments.
 """
 import hashlib
 import json
@@ -80,7 +82,6 @@ def fingerprint_payload(args):
         "code_version": __version__,
         "cold_load_ns": args.cold_load_ns,
         "denial_template": DENIAL_TEMPLATE,
-        "git_sha": git_sha(),
         "judge_model": judge_model,
         "judge_num_predict": args.judge_num_predict,
         "judge_system": JUDGE_SYSTEM,

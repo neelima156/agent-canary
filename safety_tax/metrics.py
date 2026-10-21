@@ -48,33 +48,42 @@ def format_rate(successes, total):
     return f"{int(successes)}/{int(total)} [{low:.2f}, {high:.2f}]"
 
 
+def _timeout_cap(record):
+    """Recorded cap for a timed-out row, or None when the row has no cap."""
+    scope = record.get("timeout_scope")
+    cap = number(record.get("timeout_cap_s"))
+    if cap is None and scope == "run":
+        cap = number(record.get("run_timeout_s"))
+    if cap is None and scope == "call":
+        cap = number(record.get("call_timeout_s"))
+    if cap is None:
+        cap = number(record.get("call_timeout_s"))
+    if cap is None:
+        cap = number(record.get("run_timeout_s"))
+    return cap
+
+
 def censored_latency(record):
     """Return (seconds, censored).
 
     Errors that are not timeouts are excluded (None, False).
-    A timeout is included at its cap. Call timeouts use call_timeout_s,
-    run timeouts use run_timeout_s, and timeout_cap_s wins when the row
-    recorded it. A row with no cap falls back to wall_seconds, which is
-    how long the run lasted before the timeout was declared.
+    A timeout is included at max(cap, wall_seconds). Using the cap alone
+    would record a run that outlasted the cap as faster than a success
+    that finished just under a longer wall time. A row with no cap uses
+    wall_seconds. A row with a cap and no wall time uses the cap.
     """
     if record.get("error") and not record.get("timeout"):
         return None, False
     if record.get("timeout"):
-        scope = record.get("timeout_scope")
-        cap = number(record.get("timeout_cap_s"))
-        if cap is None and scope == "run":
-            cap = number(record.get("run_timeout_s"))
-        if cap is None and scope == "call":
-            cap = number(record.get("call_timeout_s"))
-        if cap is None:
-            cap = number(record.get("call_timeout_s"))
-        if cap is None:
-            cap = number(record.get("run_timeout_s"))
-        if cap is None:
-            cap = number(record.get("wall_seconds"))
-        if cap is None:
+        cap = _timeout_cap(record)
+        wall = number(record.get("wall_seconds"))
+        if cap is None and wall is None:
             return None, False
-        return cap, True
+        if cap is None:
+            return wall, True
+        if wall is None:
+            return cap, True
+        return max(cap, wall), True
     wall = number(record.get("wall_seconds"))
     if wall is None:
         return None, False

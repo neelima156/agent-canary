@@ -1,38 +1,79 @@
 """Cost-only replay. Re-decide logged tool calls. Do not rerun the agent.
 
-This measures how long a control takes to allow or deny a call that already
-happened. It does not measure whether the control stops the canary. Rows are
-marked record_type=cost_replay and the effectiveness table ignores them.
+Calls are deduplicated by (task, tool, normalized arguments). Each unique
+call's allow/deny decision is one trial. --replay-n repeats that call only
+to time it. Rows are record_type=cost_replay and the effectiveness table
+ignores them. This does not measure whether the control stops the canary.
 """
+import json
+
 from safety_tax.client import CallTimeout, OllamaClient, OllamaError
 from safety_tax.config import SCHEMA, default_host
-from safety_tax.controls import review_call
+from safety_tax.controls import decision_label, is_legitimate_action, review_call
 from safety_tax.identity import fingerprint, git_sha
 from safety_tax.logio import SyntheticFixtureError, append_jsonl, cell_key, is_effectiveness_record, load_jsonl
 from safety_tax.loop import Deadline, call_seed_for, prepare_user
 from safety_tax.tasks import get_task
 
 
+def normalize_args(args):
+    """Stable identity for a tool call.
+
+    Path is the base name, case-folded, because the gate compares names that
+    way. Other strings are stripped. Key order does not matter.
+    """
+    if not isinstance(args, dict):
+        return json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
+    cleaned = {}
+    for key in sorted(args):
+        value = args[key]
+        if key == "path" and isinstance(value, str):
+            cleaned[key] = value.replace("\\", "/").split("/")[-1].casefold()
+        elif isinstance(value, str):
+            cleaned[key] = value.strip()
+        else:
+            cleaned[key] = value
+    return json.dumps(cleaned, ensure_ascii=False, sort_keys=True, default=str)
+
+
 def extract_calls(records, tasks):
-    """Tool calls from end-to-end rows. Warm-up and earlier replays are skipped."""
+    """Unique tool calls from end-to-end rows.
+
+    Warm-up and earlier replays are skipped. The same (task, tool, normalized
+    arguments) triple is one call no matter how many runs logged it. The
+    first occurrence supplies the source identity.
+    """
     wanted = set(tasks) if tasks else None
-    extracted = []
+    order = []
+    seen = {}
+    raw_count = 0
     for record in records:
         if not is_effectiveness_record(record):
             continue
         if wanted is not None and record["task"] not in wanted:
             continue
         for index, call in enumerate(record.get("tool_calls") or []):
-            extracted.append({
+            raw_count += 1
+            tool = call.get("tool") or ""
+            args = call.get("args") or {}
+            key = (record["task"], tool, normalize_args(args))
+            if key in seen:
+                seen[key]["duplicates"] += 1
+                continue
+            item = {
                 "task": record["task"],
                 "source_control": record.get("control"),
                 "source_run": record.get("run"),
                 "source_model": record.get("model"),
                 "call_index": index,
-                "tool": call.get("tool") or "",
-                "args": call.get("args") or {},
-            })
-    return extracted
+                "tool": tool,
+                "args": args,
+                "args_norm": key[2],
+                "duplicates": 1,
+            }
+            seen[key] = item
+            order.append(key)
+    return [seen[key] for key in order], raw_count
 
 
 def _done_keys(records, retry_errors):
@@ -66,7 +107,7 @@ def run_replay(args, client=None):
         raise
     for warning in warnings:
         print(f"warning: {warning}", flush=True)
-    calls = extract_calls(records, args.tasks)
+    calls, raw_count = extract_calls(records, args.tasks)
     if not calls:
         print(
             f"No recorded tool calls to replay in {source}. "
@@ -86,9 +127,10 @@ def run_replay(args, client=None):
     done = _done_keys(existing, args.retry_errors)
     n = args.replay_n
     print(
-        f"Cost replay: {len(calls)} logged calls × {len(args.controls)} controls × {n} replays, "
-        f"config_hash={config_hash}, source={source}, log={out}. "
-        "These rows are not effectiveness results.",
+        f"Cost replay: {len(calls)} unique calls "
+        f"(collapsed from {raw_count} logged calls) × {len(args.controls)} controls "
+        f"× {n} latency repeats, config_hash={config_hash}, source={source}, log={out}. "
+        "Allow/deny is counted once per unique call. These rows are not effectiveness results.",
         flush=True,
     )
     written = 0
@@ -115,6 +157,10 @@ def run_replay(args, client=None):
                 deadline = Deadline(args.run_timeout)
                 this_seed = call_seed_for(args.seed, replay_index)
                 try:
+                    legitimate = is_legitimate_action(task, item["tool"], item["args"])
+                except Exception:
+                    legitimate = False
+                try:
                     review = review_call(
                         control, task, item["tool"], item["args"],
                         client=client, judge_model=judge_model, deadline=deadline,
@@ -125,6 +171,7 @@ def run_replay(args, client=None):
                         num_predict=args.judge_num_predict,
                     )
                     decision = review.decision
+                    label = decision_label(decision)
                     record = {
                         "schema": SCHEMA,
                         "record_type": "cost_replay",
@@ -141,12 +188,15 @@ def run_replay(args, client=None):
                         "source_control": item["source_control"],
                         "source_model": item["source_model"],
                         "tool": item["tool"],
+                        "args_norm": item["args_norm"],
+                        "legitimate": legitimate,
+                        "duplicates_collapsed": item["duplicates"],
                         "seed": args.seed,
                         "call_seed": this_seed,
                         "keep_alive": args.keep_alive,
                         "think": False,
                         "judge_num_predict": args.judge_num_predict if control == "judge" else None,
-                        "decision": None if decision is None else ("allow" if decision.allow else "deny"),
+                        "decision": label,
                         "reason": None if decision is None else decision.reason,
                         "judge_parse": None if decision is None else decision.judge_parse,
                         "judge_gate_seconds": round(review.seconds, 3),
@@ -175,6 +225,8 @@ def run_replay(args, client=None):
                         "source_call": item["call_index"],
                         "source_control": item["source_control"],
                         "tool": item["tool"],
+                        "args_norm": item["args_norm"],
+                        "legitimate": legitimate,
                         "decision": None,
                         "judge_gate_seconds": None,
                         "model_calls": [],

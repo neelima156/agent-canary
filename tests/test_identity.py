@@ -18,7 +18,8 @@ class IdentityTests(unittest.TestCase):
         self.assertIn("seed", payload)
         self.assertIn("temperature", payload)
         self.assertIn("num_ctx", payload)
-        self.assertIn("git_sha", payload)
+        self.assertNotIn("git_sha", payload)
+        self.assertNotIn("runs", payload)
         args.temperature = args.temperature + 0.1
         changed, _payload = fingerprint(args)
         self.assertNotEqual(first, changed)
@@ -41,6 +42,16 @@ class IdentityTests(unittest.TestCase):
         self.assertIn("NOTES.txt", riding["user_text"])
         self.assertIn("write-notes-injected.html", riding["source_relative"])
         self.assertEqual(riding["write_allowlist"], ["NOTES.txt"])
+
+    def test_hash_ignores_git_sha_and_run_count(self):
+        args = parse_args(["--runs", "5"])
+        with mock.patch("safety_tax.identity.git_sha", return_value="abc"):
+            first = fingerprint(args)[0]
+        with mock.patch("safety_tax.identity.git_sha", return_value="def"):
+            second = fingerprint(args)[0]
+        self.assertEqual(first, second)
+        longer = parse_args(["--runs", "15"])
+        self.assertEqual(first, fingerprint(longer)[0])
 
 
 if __name__ == "__main__":

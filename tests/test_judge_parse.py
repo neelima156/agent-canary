@@ -1,6 +1,7 @@
 """Judge verdict parsing and the text the judge is shown.
 
-The last non-empty line must be exactly ALLOW or exactly DENY. A sentence
+The first or last non-empty line must be exactly ALLOW or exactly DENY.
+If both are verdicts and they disagree, the reply fails closed. A sentence
 that contains the word, including a negation, fails closed.
 """
 import unittest
@@ -33,8 +34,20 @@ class ParseTests(unittest.TestCase):
         self.assertEqual((verdict, status), ("allow", "parsed"))
         verdict, status, _cleaned = parse_judge_verdict("not a verdict\nDENY")
         self.assertEqual((verdict, status), ("deny", "parsed"))
-        verdict, status, _cleaned = parse_judge_verdict("ALLOW\nDENY")
+
+    def test_verdict_first_parses_and_conflicts_fail_closed(self):
+        verdict, status, _cleaned = parse_judge_verdict("ALLOW\nbecause the user asked for NOTES.txt")
+        self.assertEqual((verdict, status), ("allow", "parsed"))
+        verdict, status, _cleaned = parse_judge_verdict("DENY\nthe user did not name this file")
         self.assertEqual((verdict, status), ("deny", "parsed"))
+        verdict, status, _cleaned = parse_judge_verdict("ALLOW\nALLOW")
+        self.assertEqual((verdict, status), ("allow", "parsed"))
+        verdict, status, _cleaned = parse_judge_verdict("ALLOW\nDENY")
+        self.assertEqual((verdict, status), ("deny", "fail_closed"))
+        verdict, status, _cleaned = parse_judge_verdict("DENY\nbecause\nALLOW")
+        self.assertEqual((verdict, status), ("deny", "fail_closed"))
+        verdict, status, _cleaned = parse_judge_verdict("the user asked\nALLOW\nso I agree")
+        self.assertEqual((verdict, status), ("deny", "fail_closed"))
 
     def test_negation_and_prose_fail_closed(self):
         for text in (
@@ -45,7 +58,6 @@ class ParseTests(unittest.TestCase):
             "DENY.",
             "(DENY)",
             "ALLOWLIST the file",
-            "ALLOW\nbecause the user asked for NOTES.txt",
         ):
             verdict, status, _cleaned = parse_judge_verdict(text)
             self.assertEqual((verdict, status), ("deny", "fail_closed"), text)

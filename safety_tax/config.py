@@ -22,14 +22,18 @@ DEFAULT_NUM_CTX = 4096
 DEFAULT_SEED = 0
 DEFAULT_ORDER_SEED = 20261020
 DEFAULT_KEEP_ALIVE = "30m"
-# The judge must answer ALLOW or DENY. Cap its generation so a ramble is not
-# the thing we time. The agent loop is not capped: a summary needs room.
+# The judge must put ALLOW or DENY on the first line. 32 tokens is enough for
+# that line plus a short reason. A longer reason can be cut; the parser still
+# reads a verdict-first reply. The cap stays small so a ramble is not what we
+# time. The agent loop is not capped: a summary needs room.
 DEFAULT_JUDGE_NUM_PREDICT = 32
 # Ollama's load_duration is nanoseconds. A real model load is well above 1 second.
 DEFAULT_COLD_LOAD_NS = 1_000_000_000
 DEFAULT_BOOTSTRAP_SAMPLES = 2000
 DEFAULT_BOOTSTRAP_SEED = 0
-DEFAULT_REPLAY_N = 30
+# Latency repeats of each unique logged call. The allow/deny decision is
+# counted once; these repeats are not extra effectiveness trials.
+DEFAULT_REPLAY_N = 5
 SCHEMA = 2
 DEFAULT_OUT = os.path.join("results", "safety-tax", "runs.jsonl")
 

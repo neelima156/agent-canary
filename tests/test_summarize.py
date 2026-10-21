@@ -222,6 +222,31 @@ class EdgeTests(unittest.TestCase):
         self.assertEqual(row["time_overhead_vs_none"], "n/a")
         self.assertIsNone(row["time_overhead_ratio"])
 
+    def test_same_hash_with_different_shas_stays_one_cell(self):
+        first = self._record("summarize_clean", "none", 1, 10, 10)
+        second = self._record("summarize_clean", "none", 2, 30, 30)
+        first["config_hash"] = "abc123"
+        second["config_hash"] = "abc123"
+        first["git_sha"] = "1111aaaa"
+        second["git_sha"] = "2222bbbb"
+        summary = summarize_records([first, second])
+        self.assertEqual(len(summary["rows"]), 1)
+        self.assertEqual(summary["rows"][0]["n"], 2)
+        self.assertEqual(summary["rows"][0]["config_hash"], "abc123")
+        text = render_markdown(summary, source="runs.jsonl")
+        self.assertIn("grouped by config hash, not by SHA", text)
+        self.assertIn("1111aaaa", text)
+        self.assertIn("2222bbbb", text)
+
+    def test_fail_closed_runs_are_not_counted_as_the_only_deny_signal(self):
+        record = self._record("write_notes", "judge", 1, 10, 10, blocked=True)
+        record["fail_closed_denials"] = 1
+        record["judge_model"] = "m"
+        summary = summarize_records([record])
+        row = summary["rows"][0]
+        self.assertEqual(row["false_blocks"], 1)
+        self.assertEqual(row["fail_closed"], 1)
+
     def test_empty_log_is_a_blank_template(self):
         text = render_empty_template()
         self.assertIn("No runs yet", text)
