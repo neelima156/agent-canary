@@ -4,4 +4,4 @@ Reuses the harmless CANARY.txt / BLUEBIRD canary from agent.py.
 This package ships the harness only. It does not contain measurements.
 """
 
-__version__ = "1"
+__version__ = "2"

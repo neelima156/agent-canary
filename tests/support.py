@@ -37,7 +37,8 @@ class FakeClient:
         self.replies = list(replies)
         self.calls = []
 
-    def chat(self, model, messages, tools=None, temperature=0.7, timeout=300, num_ctx=4096):
+    def chat(self, model, messages, tools=None, temperature=0.7, timeout=300, num_ctx=4096,
+             seed=None, keep_alive=None, think=None, num_predict=None):
         self.calls.append({
             "model": model,
             "messages": copy.deepcopy(messages),
@@ -45,6 +46,10 @@ class FakeClient:
             "temperature": temperature,
             "timeout": timeout,
             "num_ctx": num_ctx,
+            "seed": seed,
+            "keep_alive": keep_alive,
+            "think": think,
+            "num_predict": num_predict,
         })
         if not self.replies:
             raise AssertionError("no scripted replies left")
